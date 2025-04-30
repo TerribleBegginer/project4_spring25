@@ -1,32 +1,24 @@
+// rsh.c - Client shell with sendmsg functionality
 #include <stdio.h>
 #include <stdlib.h>
-#include <spawn.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <pthread.h>
 
-#define N 13
+#define MAX_MSG 256
 
-extern char **environ;
-char uName[20];
-
-char *allowed[N] = {"cp","touch","mkdir","ls","pwd","cat","grep","chmod","diff","cd","exit","help","sendmsg"};
+char uName[32];
 
 struct message {
-	char source[50];
-	char target[50]; 
-	char msg[200];
+    char source[32];
+    char target[32];
+    char msg[MAX_MSG];
 };
 
-void terminate(int sig) {
-        printf("Exiting....\n");
-        fflush(stdout);
-        exit(0);
-}
-
-void sendmsg (char *user, char *target, char *msg) {
+// Function to send a message to another user via server FIFO
 void sendmsg(char *user, char *target, char *msg) {
     struct message m;
     strcpy(m.source, user);
@@ -41,19 +33,9 @@ void sendmsg(char *user, char *target, char *msg) {
 
     write(fd, &m, sizeof(m));
     close(fd);
-
 }
 
-
-
-
-
-
-
-
-}
-
-void* messageListener(void *arg) {
+// Thread function to listen for incoming messages on the user's FIFO
 void* messageListener(void *arg) {
     int fd;
     struct message m;
@@ -78,161 +60,70 @@ void* messageListener(void *arg) {
     pthread_exit((void*)0);
 }
 
-
-
-
-
-
-
-	pthread_exit((void*)0);
-}
-
-int isAllowed(const char*cmd) {
-	int i;
-	for (i=0;i<N;i++) {
-		if (strcmp(cmd,allowed[i])==0) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
 int main(int argc, char **argv) {
-    pid_t pid;
-    char **cargv; 
-    char *path;
+    if (argc < 2) {
+        printf("usage: %s <username>\n", argv[0]);
+        exit(1);
+    }
+
+    strcpy(uName, argv[1]);
+    mkfifo(uName, 0666);
+
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, messageListener, NULL) != 0) {
+        perror("Failed to create message listener thread");
+        exit(1);
+    }
+
     char line[256];
-    int status;
-    posix_spawnattr_t attr;
-
-    if (argc!=2) {
-	printf("Usage: ./rsh <username>\n");
-	exit(1);
-    }
-    signal(SIGINT,terminate);
-
-    strcpy(uName,argv[1]);
-
-    // TODO:
-    // create the message listener thread
-pthread_t tid;
-if (pthread_create(&tid, NULL, messageListener, NULL) != 0) {
-    perror("Failed to create message listener thread");
-    exit(1);
-}
-
-
-
-
-
-
     while (1) {
+        printf("rsh> ");
+        fflush(stdout);
+        if (fgets(line, sizeof(line), stdin) == NULL) break;
 
-	fprintf(stderr,"rsh>");
+        line[strcspn(line, "\n")] = '\0';
+        char *cmd = strtok(line, " ");
+        if (!cmd) continue;
 
-	if (fgets(line,256,stdin)==NULL) continue;
+        if (strcmp(cmd, "cd") == 0) {
+            char *dir = strtok(NULL, " ");
+            if (dir == NULL) {
+                fprintf(stderr, "cd: missing argument\n");
+                continue;
+            }
+            chdir(dir);
+        } else if (strcmp(cmd, "exit") == 0) {
+            unlink(uName);
+            exit(0);
+        } else if (strcmp(cmd, "help") == 0) {
+            printf("cd <dir>\nexit\nhelp\nsendmsg <user> <message>\n");
+        } else if (strcmp(cmd, "sendmsg") == 0) {
+            char *target = strtok(NULL, " ");
+            if (!target) {
+                printf("sendmsg: you have to specify target user\n");
+                continue;
+            }
+            char *messageStart = strtok(NULL, "");
+            if (!messageStart) {
+                printf("sendmsg: you have to enter a message\n");
+                continue;
+            }
+            sendmsg(uName, target, messageStart);
+        } else {
+            pid_t pid;
+            int status;
+            char *args[64];
+            int i = 0;
+            args[i++] = cmd;
+            while ((args[i] = strtok(NULL, " ")) != NULL) i++;
 
-	if (strcmp(line,"\n")==0) continue;
-
-	line[strlen(line)-1]='\0';
-
-	char cmd[256];
-	char line2[256];
-	strcpy(line2,line);
-	strcpy(cmd,strtok(line," "));
-
-	if (!isAllowed(cmd)) {
-		printf("NOT ALLOWED!\n");
-		continue;
-	}
-
-	if (strcmp(cmd,"sendmsg")==0) {
-		char *target = strtok(NULL, " ");
-		if (!target) {
-			printf("sendmsg: you have to specify target user\n");
-			continue; 
-		}
-		char *messageStart = strtok(NULL, "");
-		if (!messageStart) {
-			printf("sendmsg: you have to enter a message\n");
-			continue;
-		}
-		sendmsg(uName, target, messageStart);
-
-
-
-
-
-
-
-
-
-
-		continue;
-	}
-
-	if (strcmp(cmd,"exit")==0) break;
-
-	if (strcmp(cmd,"cd")==0) {
-		char *targetDir=strtok(NULL," ");
-		if (strtok(NULL," ")!=NULL) {
-			printf("-rsh: cd: too many arguments\n");
-		}
-		else {
-			chdir(targetDir);
-		}
-		continue;
-	}
-
-	if (strcmp(cmd,"help")==0) {
-		printf("The allowed commands are:\n");
-		for (int i=0;i<N;i++) {
-			printf("%d: %s\n",i+1,allowed[i]);
-		}
-		continue;
-	}
-
-	cargv = (char**)malloc(sizeof(char*));
-	cargv[0] = (char *)malloc(strlen(cmd)+1);
-	path = (char *)malloc(9+strlen(cmd)+1);
-	strcpy(path,cmd);
-	strcpy(cargv[0],cmd);
-
-	char *attrToken = strtok(line2," "); /* skip cargv[0] which is completed already */
-	attrToken = strtok(NULL, " ");
-	int n = 1;
-	while (attrToken!=NULL) {
-		n++;
-		cargv = (char**)realloc(cargv,sizeof(char*)*n);
-		cargv[n-1] = (char *)malloc(strlen(attrToken)+1);
-		strcpy(cargv[n-1],attrToken);
-		attrToken = strtok(NULL, " ");
-	}
-	cargv = (char**)realloc(cargv,sizeof(char*)*(n+1));
-	cargv[n] = NULL;
-
-	// Initialize spawn attributes
-	posix_spawnattr_init(&attr);
-
-	// Spawn a new process
-	if (posix_spawnp(&pid, path, NULL, &attr, cargv, environ) != 0) {
-		perror("spawn failed");
-		exit(EXIT_FAILURE);
-	}
-
-	// Wait for the spawned process to terminate
-	if (waitpid(pid, &status, 0) == -1) {
-		perror("waitpid failed");
-		exit(EXIT_FAILURE);
-	}
-
-	// Destroy spawn attributes
-	posix_spawnattr_destroy(&attr);
-
+            if (posix_spawnp(&pid, cmd, NULL, NULL, args, environ) != 0) {
+                perror("posix_spawnp");
+                continue;
+            }
+            waitpid(pid, &status, 0);
+        }
     }
+
     return 0;
 }
-
-
-	
-
