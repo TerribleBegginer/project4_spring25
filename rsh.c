@@ -51,7 +51,7 @@ void* messageListener(void *arg) {
     while (1) {
         int bytes = read(fd, &m, sizeof(m));
         if (bytes > 0) {
-            printf("Incoming message from %s: %s\n", m.source, m.msg);
+            printf("%s: %s\n", m.source, m.msg);
             fflush(stdout);
         }
     }
