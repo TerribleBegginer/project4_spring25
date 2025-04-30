@@ -197,3 +197,19 @@ int main(int argc, char **argv) {
     }
     return 0;
 }
+
+void sendmsg(char *user, char *target, char *msg) {
+    struct message m;
+    strcpy(m.source, user);
+    strcpy(m.target, target);
+    strcpy(m.msg, msg);
+
+    int fd = open("serverFIFO", O_WRONLY);
+    if (fd < 0) {
+        perror("Failed to open serverFIFO");
+        return;
+    }
+
+    write(fd, &m, sizeof(m));
+    close(fd);
+}
