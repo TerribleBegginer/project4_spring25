@@ -29,19 +29,25 @@ int main() {
 	dummyfd = open("serverFIFO",O_WRONLY);
 
 	while (1) {
-		// TODO:
-		// read requests from serverFIFO
+		if (read(server, &req, sizeof(req)) <= 0) {
+			continue;
+		}
 
 
 
 
 
 
-		printf("Received a request from %s to send the message %s to %s.\n",req.source,req.msg,req.target);
 
-		// TODO:
-		// open target FIFO and write the whole message struct to the target FIFO
-		// close target FIFO after writing the message
+printf("Received a request from %s to send the message %s to %s.\n",req.source,req.msg,req.target);
+target = open(req.target, O_WRONLY);
+if (target < 0) {
+    perror("Failed to open target FIFO");
+    continue;
+}
+write(target, &req, sizeof(req));
+close(target);
+
 
 
 
