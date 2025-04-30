@@ -1,63 +1,48 @@
-
+// server.c - Message relay server for rsh
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <string.h>
-#include <signal.h>
+
+#define MAX_MSG 256
 
 struct message {
-	char source[50];
-	char target[50]; 
-	char msg[200]; // message body
+    char source[32];
+    char target[32];
+    char msg[MAX_MSG];
 };
 
-void terminate(int sig) {
-	printf("Exiting....\n");
-	fflush(stdout);
-	exit(0);
-}
-
 int main() {
-	int server;
-	int target;
-	int dummyfd;
-	struct message req;
-	signal(SIGPIPE,SIG_IGN);
-	signal(SIGINT,terminate);
-	server = open("serverFIFO",O_RDONLY);
-	dummyfd = open("serverFIFO",O_WRONLY);
+    struct message req;
+    int server, target;
 
-	while (1) {
-		if (read(server, &req, sizeof(req)) <= 0) {
-			continue;
-		}
+    unlink("serverFIFO");
+    mkfifo("serverFIFO", 0666);
 
+    server = open("serverFIFO", O_RDONLY);
+    if (server < 0) {
+        perror("open serverFIFO");
+        exit(1);
+    }
 
+    while (1) {
+        // Read the message from client
+        if (read(server, &req, sizeof(req)) <= 0) {
+            continue;
+        }
 
+        // Attempt to open the target FIFO and forward the message
+        target = open(req.target, O_WRONLY);
+        if (target < 0) {
+            perror("Failed to open target FIFO");
+            continue;
+        }
 
+        write(target, &req, sizeof(req));
+        close(target);
+    }
 
-
-
-printf("Received a request from %s to send the message %s to %s.\n",req.source,req.msg,req.target);
-target = open(req.target, O_WRONLY);
-if (target < 0) {
-    perror("Failed to open target FIFO");
-    continue;
+    close(server);
+    return 0;
 }
-write(target, &req, sizeof(req));
-close(target);
-
-
-
-
-
-
-
-
-	}
-	close(server);
-	close(dummyfd);
-	return 0;
-}
-
